@@ -26,6 +26,7 @@ use Doctrine\DBAL\LockMode;
 use Doctrine\DBAL\Types\Type;
 
 use Doctrine\Common\Collections\Criteria;
+use Doctrine\ORM\ORMException;
 use Doctrine\ORM\Utility\PersisterHelper;
 
 /**
@@ -281,8 +282,26 @@ class JoinedSubclassPersister extends AbstractEntityInheritancePersister
         if ($this->platform->supportsForeignKeyConstraints()) {
             $rootClass  = $this->em->getClassMetadata($this->class->rootEntityName);
             $rootTable  = $this->quoteStrategy->getTableName($rootClass, $this->platform);
+            $types      = array_map(function ($identifier) use ($rootClass) {
+                if (isset($rootClass->fieldMappings[$identifier])) {
+                    return $rootClass->fieldMappings[$identifier]['type'];
+                }
 
-            return (bool) $this->conn->delete($rootTable, $id);
+                $targetMapping = $this->em->getClassMetadata($rootClass->associationMappings[$identifier]['targetEntity']);
+
+                if (isset($targetMapping->fieldMappings[$targetMapping->identifier[0]])) {
+                    return $targetMapping->fieldMappings[$targetMapping->identifier[0]]['type'];
+                }
+
+                if (isset($targetMapping->associationMappings[$targetMapping->identifier[0]])) {
+                    return $targetMapping->associationMappings[$targetMapping->identifier[0]]['type'];
+                }
+
+                throw ORMException::unrecognizedField($targetMapping->identifier[0]);
+
+            }, $rootClass->identifier);
+
+            return (bool) $this->conn->delete($rootTable, $id, $types);
         }
 
         // Delete from all tables individually, starting from this class' table up to the root table.
